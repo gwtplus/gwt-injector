@@ -17,7 +17,13 @@ package org.gwtproject.injector.client;
 
 import org.gwtproject.callback.shared.Callback;
 
-import com.google.gwt.core.client.JavaScriptObject;
+import elemental2.dom.Document;
+import elemental2.dom.DomGlobal;
+import elemental2.dom.ErrorEvent;
+import elemental2.dom.HTMLScriptElement;
+import elemental2.dom.Window;
+import jsinterop.annotations.JsProperty;
+import jsinterop.base.Js;
 
 /**
  * Dynamically create a script tag and attach it to the DOM.
@@ -44,8 +50,15 @@ import com.google.gwt.core.client.JavaScriptObject;
  *        }
  *     }).inject();
  * </pre>
+ * <p>
+ * NOTE: This class uses {@link Js#uncheckedCast(Object)} because
+ * elemental2 types all assume &lt;global>/$wnd as a namespace and
+ * this class uses both &lt;global> and &lt;window>
  */
 public class ScriptInjector {
+  
+  @JsProperty(namespace = "<window>", name = "self")
+  static native Window currentWindow();
 
   /**
    * Builder for directly injecting a script body into the DOM.
@@ -53,7 +66,7 @@ public class ScriptInjector {
   public static class FromString {
     private boolean removeTag = true;
     private final String scriptBody;
-    private JavaScriptObject window;
+    private Window window;
 
     /**
      * @param scriptBody The script text to install into the document.
@@ -72,19 +85,25 @@ public class ScriptInjector {
      * @return the script element created for the injection. Note that it may be
      *         removed from the DOM.
      */
-    public JavaScriptObject inject() {
-      JavaScriptObject wnd = (window == null) ? nativeDefaultWindow() : window;
+    public <T> T inject() {
+      Window wnd = (window == null) ? currentWindow() : window;
       assert wnd != null;
-      JavaScriptObject doc = nativeGetDocument(wnd);
+      
+      HasDocument hasDoc = Js.uncheckedCast(wnd);
+      Document doc = hasDoc.document;
       assert doc != null;
-      JavaScriptObject scriptElement = nativeMakeScriptElement(doc);
+      
+      HTMLScriptElement scriptElement = Js.uncheckedCast(doc.createElement("script"));
       assert scriptElement != null;
-      nativeSetText(scriptElement, scriptBody);
-      nativeAttachToHead(doc, scriptElement);
+      
+      scriptElement.text = scriptBody;
+      doc.head.appendChild(scriptElement);
+      
       if (removeTag) {
-        nativeRemove(scriptElement);
+        scriptElement.parentNode.removeChild(scriptElement);
       }
-      return scriptElement;
+      
+      return Js.uncheckedCast(scriptElement);
     }
 
     /**
@@ -100,11 +119,21 @@ public class ScriptInjector {
     }
 
     /**
-     * @param window Specify which window to use to install the script. If not
-     *          specified, the top current window GWT is loaded in is used.
+     * <b>NOTE:</b> Previously this method accepted JavaScriptObject. The signature
+     * changed to Object to remove dependency and keep it compatible with
+     * existing code. Uses unchecked cast.
+     * <p>
+     * This call allows you to specify which DOM window object to install the
+     * script tag in. To install into the Top level window call
+     * <p>
+     * <code>
+     *   builder.setWindow(ScriptInjector.TOP_WINDOW);
+     * </code>
+     * 
+     * @param window Specifies which window to install in.
      */
-    public FromString setWindow(JavaScriptObject window) {
-      this.window = window;
+    public FromString setWindow(Object window) {
+      this.window = (Window) window;
       return this;
     }
   }
@@ -116,7 +145,7 @@ public class ScriptInjector {
     private Callback<Void, Exception> callback;
     private boolean removeTag = false;
     private final String scriptUrl;
-    private JavaScriptObject window;
+    private Window window;
 
     private FromUrl(String scriptUrl) {
       this.scriptUrl = scriptUrl;
@@ -128,19 +157,25 @@ public class ScriptInjector {
      * 
      * @return the script element created for the injection.
      */
-    public JavaScriptObject inject() {
-      JavaScriptObject wnd = (window == null) ? nativeDefaultWindow() : window;
+    public <T> T inject() {
+      Window wnd = (window == null) ? currentWindow() : window;
       assert wnd != null;
-      JavaScriptObject doc = nativeGetDocument(wnd);
+      
+      HasDocument hasDoc = Js.uncheckedCast(wnd);
+      Document doc = hasDoc.document;
       assert doc != null;
-      JavaScriptObject scriptElement = nativeMakeScriptElement(doc);
+      
+      HTMLScriptElement scriptElement = Js.uncheckedCast(doc.createElement("script"));
       assert scriptElement != null;
+      
       if (callback != null || removeTag) {
         attachListeners(scriptElement, callback, removeTag);
       }
-      nativeSetSrc(scriptElement, scriptUrl);
-      nativeAttachToHead(doc, scriptElement);
-      return scriptElement;
+      
+      scriptElement.src = scriptUrl;
+      doc.head.appendChild(scriptElement);
+      
+      return Js.uncheckedCast(scriptElement);
     }
 
     /**
@@ -186,17 +221,21 @@ public class ScriptInjector {
     }
 
     /**
+     * <b>NOTE:</b> Previously this method accepted JavaScriptObject. The signature
+     * changed to Object to remove dependency and keep it compatible with
+     * existing code. Uses unchecked cast.
+     * <p>
      * This call allows you to specify which DOM window object to install the
      * script tag in. To install into the Top level window call
-     * 
+     * <p>
      * <code>
      *   builder.setWindow(ScriptInjector.TOP_WINDOW);
      * </code>
      * 
      * @param window Specifies which window to install in.
      */
-    public FromUrl setWindow(JavaScriptObject window) {
-      this.window = window;
+    public FromUrl setWindow(Object window) {
+      this.window = Js.uncheckedCast(window);
       return this;
     }
   }
@@ -209,7 +248,7 @@ public class ScriptInjector {
    * Note that if your GWT app is loaded from a different domain than the top
    * window, you may not be able to add a script element to the top window.
    */
-  public static final JavaScriptObject TOP_WINDOW = nativeTopWindow();
+  public static final Window TOP_WINDOW = DomGlobal.window;
 
   /**
    * Build an injection call for directly setting the script text in the DOM.
@@ -253,67 +292,46 @@ public class ScriptInjector {
    * @param scriptElement element to which the event handlers will be attached
    * @param callback callback that runs when the script is loaded and parsed.
    */
-  private static native void attachListeners(JavaScriptObject scriptElement,
-      Callback<Void, Exception> callback, boolean removeTag) /*-{
-    function clearCallbacks() {
-      scriptElement.onerror = scriptElement.onreadystatechange = scriptElement.onload = null;
+  private static void attachListeners(HTMLScriptElement scriptElement,
+      Callback<Void, Exception> callback, boolean removeTag) {
+    
+    Runnable clearCallbacks = () -> {
+      scriptElement.onload = null;
+      scriptElement.onerror = null;
+      
       if (removeTag) {
-        @org.gwtproject.injector.client.ScriptInjector::nativeRemove(Lcom/google/gwt/core/client/JavaScriptObject;)(scriptElement);
+        scriptElement.parentNode.removeChild(scriptElement);
       }
-    }
-    scriptElement.onload = $entry(function() {
-      clearCallbacks();
-      if (callback) {
-        callback.@org.gwtproject.callback.shared.Callback::onSuccess(Ljava/lang/Object;)(null);
+    };
+    
+    scriptElement.onload = e -> {
+      clearCallbacks.run();
+      if (callback != null) {
+        callback.onSuccess(null);
       }
-    });
+      return false;
+    };
+    
     // or possibly more portable script_tag.addEventListener('error', function(){...}, true);
-    scriptElement.onerror = $entry(function() {
-      clearCallbacks();
-      if (callback) {
-        var ex = @org.gwtproject.injector.client.CodeDownloadException::new(Ljava/lang/String;)("onerror() called.");
-        callback.@org.gwtproject.callback.shared.Callback::onFailure(Ljava/lang/Object;)(ex);
+    scriptElement.onerror = e -> {
+      clearCallbacks.run();
+      if (callback != null) {
+        ErrorEvent errorEvent = Js.uncheckedCast(e);
+        CodeDownloadException reason = new CodeDownloadException(errorEvent.message);
+        callback.onFailure(reason);
       }
-    });
+      return false;
+    };
+  }
+  
+  // TODO: maybe handle onreadystatechange event if onload doesn't work on IE10+
+  /*-{
     scriptElement.onreadystatechange = $entry(function() {
       if (/loaded|complete/.test(scriptElement.readyState)) {
         scriptElement.onload();
       }
     });
-  }-*/;
-
-  private static native void nativeAttachToHead(JavaScriptObject doc, JavaScriptObject scriptElement) /*-{
-    // IE8 does not have document.head
-    (doc.head || doc.getElementsByTagName("head")[0]).appendChild(scriptElement);
-  }-*/;
-
-  private static native JavaScriptObject nativeDefaultWindow() /*-{
-    return window;
-  }-*/;
-
-  private static native JavaScriptObject nativeGetDocument(JavaScriptObject wnd) /*-{
-    return wnd.document;
-  }-*/;
-
-  private static native JavaScriptObject nativeMakeScriptElement(JavaScriptObject doc) /*-{
-    return doc.createElement("script");
-  }-*/;
-
-  private static native void nativeRemove(JavaScriptObject scriptElement) /*-{
-    scriptElement.parentNode.removeChild(scriptElement);
-  }-*/;
-
-  private static native void nativeSetSrc(JavaScriptObject element, String url) /*-{
-    element.src = url;
-  }-*/;
-
-  private static native void nativeSetText(JavaScriptObject element, String scriptBody) /*-{
-    element.text = scriptBody;
-  }-*/;
-
-  private static native JavaScriptObject nativeTopWindow() /*-{
-    return $wnd;
-  }-*/;
+  }-*/
 
   /**
    * Utility class - do not instantiate.

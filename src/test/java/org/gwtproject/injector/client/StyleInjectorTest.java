@@ -17,10 +17,11 @@ package org.gwtproject.injector.client;
 
 import com.google.gwt.dom.client.DivElement;
 import com.google.gwt.dom.client.Document;
-import com.google.gwt.dom.client.StyleElement;
 import com.google.gwt.junit.client.GWTTestCase;
 import com.google.gwt.user.client.Command;
 import com.google.gwt.user.client.DeferredCommand;
+
+import elemental2.dom.HTMLStyleElement;
 
 /**
  * Tests StyleInjector by looking for effects of injected CSS on DOM elements.
@@ -65,7 +66,7 @@ public class StyleInjectorTest extends GWTTestCase {
    */
   @SuppressWarnings("deprecation")
   public void testOldMethodsWithLotsOfStyles() {
-    StyleElement[] elements = new StyleElement[100];
+    HTMLStyleElement[] elements = new HTMLStyleElement[100];
     for (int i = 0, j = elements.length; i < j; i++) {
       elements[i] = StyleInjector.injectStylesheet("#styleInjectorTest" + i
           + " {position: absolute; left: 100px; width: 50px; height 50px;}");

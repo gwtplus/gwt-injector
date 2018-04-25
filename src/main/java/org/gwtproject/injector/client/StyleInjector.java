@@ -15,15 +15,15 @@
  */
 package org.gwtproject.injector.client;
 
-import com.google.gwt.core.client.GWT;
-import com.google.gwt.core.client.JavaScriptObject;
-import com.google.gwt.core.client.JsArrayString;
 import com.google.gwt.core.client.Scheduler;
 import com.google.gwt.core.client.Scheduler.ScheduledCommand;
-import com.google.gwt.dom.client.Document;
-import com.google.gwt.dom.client.Element;
-import com.google.gwt.dom.client.HeadElement;
-import com.google.gwt.dom.client.StyleElement;
+
+import elemental2.core.JsArray;
+import elemental2.dom.DomGlobal;
+import elemental2.dom.HTMLHeadElement;
+import elemental2.dom.HTMLStyleElement;
+
+// TODO: provide new better API based on ScriptInjector for gwt-resource module
 
 /**
  * Used to add stylesheets to the document. The one-argument versions of
@@ -43,174 +43,57 @@ import com.google.gwt.dom.client.StyleElement;
  */
 public class StyleInjector {
 
+  private static final StyleInjectorImpl sImpl = new StyleInjectorImpl();
+  
   /**
    * The DOM-compatible way of adding stylesheets. This implementation requires
    * the host HTML page to have a head element defined.
    */
   public static class StyleInjectorImpl {
-    private static final StyleInjectorImpl IMPL = GWT.create(StyleInjectorImpl.class);
+    
+    private HTMLHeadElement head;
 
-    private HeadElement head;
-
-    public StyleElement injectStyleSheet(String contents) {
-      StyleElement style = createElement(contents);
+    public HTMLStyleElement injectStyleSheet(String contents) {
+      HTMLStyleElement style = createElement(contents);
       getHead().appendChild(style);
       return style;
     }
 
-    public StyleElement injectStyleSheetAtEnd(String contents) {
+    public HTMLStyleElement injectStyleSheetAtEnd(String contents) {
       return injectStyleSheet(contents);
     }
 
-    public StyleElement injectStyleSheetAtStart(String contents) {
-      StyleElement style = createElement(contents);
-      getHead().insertBefore(style, head.getFirstChild());
+    public HTMLStyleElement injectStyleSheetAtStart(String contents) {
+      HTMLStyleElement style = createElement(contents);
+      getHead().insertBefore(style, head.firstChild);
       return style;
     }
-
-    public void setContents(StyleElement style, String contents) {
-      style.setInnerText(contents);
+    
+    public void setContents(HTMLStyleElement style, String contents) {
+      style.textContent = contents;
     }
 
-    private StyleElement createElement(String contents) {
-      StyleElement style = Document.get().createStyleElement();
-      style.setPropertyString("language", "text/css");
+    private HTMLStyleElement createElement(String contents) {
+      HTMLStyleElement style = (HTMLStyleElement) DomGlobal.document.createElement("style");
+      style.lang = "text/css";
       setContents(style, contents);
       return style;
     }
 
-    private HeadElement getHead() {
+    private HTMLHeadElement getHead() {
       if (head == null) {
-        Element elt = Document.get().getElementsByTagName("head").getItem(0);
-        assert elt != null : "The host HTML page does not have a <head> element"
+        HTMLHeadElement maybeHead = DomGlobal.document.head;
+        assert maybeHead != null : "The host HTML page does not have a <head> element"
             + " which is required by StyleInjector";
-        head = HeadElement.as(elt);
+        head = maybeHead;
       }
       return head;
     }
   }
 
-  /**
-   * IE doesn't allow manipulation of a style element through DOM methods. There
-   * is also a hard-coded limit on the number of times that createStyleSheet can
-   * be called before IE8-9 starts throwing exceptions.
-   */
-  public static class StyleInjectorImplIE extends StyleInjectorImpl {
-
-    /**
-     * The maximum number of style tags that can be handled by IE.
-     */
-    private static final int MAX_STYLE_SHEETS = 31;
-    
-    /**
-     * A cache of the lengths of the current style sheets.  A value of 0
-     * indicates that the length has not yet been retrieved.
-     */
-    private static int[] styleSheetLengths = new int[MAX_STYLE_SHEETS];
-
-    private static native int getDocumentStyleCount() /*-{
-      return $doc.styleSheets.length;
-    }-*/;
-
-    private static native StyleElement getDocumentStyleSheet(int index) /*-{
-      return $doc.styleSheets[index];
-    }-*/;
-
-    private static native int getDocumentStyleSheetLength(int index) /*-{
-      return $doc.styleSheets[index].cssText.length;
-    }-*/;
-
-    public native void appendContents(StyleElement style, String contents) /*-{
-      style.cssText += contents;
-    }-*/;
-
-    @Override
-    public StyleElement injectStyleSheet(String contents) {
-      int numStyles = getDocumentStyleCount(); 
-      if (numStyles < MAX_STYLE_SHEETS) {
-        // Just create a new style element and add it to the list
-        return createNewStyleSheet(contents);
-      } else {
-        /*
-         * Find shortest style element to minimize re-parse time in the general
-         * case.
-         * 
-         * We cache the lengths of the style sheets in order to avoid expensive
-         * calls to retrieve their actual contents. Note that if another module
-         * or script makes changes to the style sheets that we are unaware of,
-         * the worst that will happen is that we will choose a style sheet to
-         * append to that is not actually of minimum size.
-         *
-         * We also play safe by counting only the MAX_STYLE_SHEETS first style
-         * sheets, just in case the limits are raised somehow (e.g. if this
-         * implementation is used in IE10 which removes --or significantly
-         * raises-- the limits.)
-         */
-        int shortestLen = Integer.MAX_VALUE;
-        int shortestIdx = -1;
-        for (int i = 0; i < MAX_STYLE_SHEETS; i++) {
-          int len = styleSheetLengths[i];
-          if (len == 0) {
-            // Cache the length
-            len = styleSheetLengths[i] = getDocumentStyleSheetLength(i);
-          }
-          if (len <= shortestLen) {
-            shortestLen = len;
-            shortestIdx = i;
-          }
-        }
-        styleSheetLengths[shortestIdx] += contents.length();
-        return appendToStyleSheet(shortestIdx, contents, true); 
-      }
-    }
-
-    @Override
-    public StyleElement injectStyleSheetAtEnd(String contents) {
-      int documentStyleCount = getDocumentStyleCount();
-      if (documentStyleCount == 0) {
-        return createNewStyleSheet(contents);
-      }
-    
-      return appendToStyleSheet(documentStyleCount - 1, contents, true);
-    }
-
-    @Override
-    public StyleElement injectStyleSheetAtStart(String contents) {
-      if (getDocumentStyleCount() == 0) {
-        return createNewStyleSheet(contents);
-      }
-    
-      return appendToStyleSheet(0, contents, false); // prepend
-    }
-
-    public native void prependContents(StyleElement style, String contents) /*-{
-      style.cssText = contents + style.cssText;
-    }-*/;
-
-    private StyleElement appendToStyleSheet(int idx, String contents, boolean append) {
-      StyleElement style = getDocumentStyleSheet(idx);
-      if (append) {
-        appendContents(style, contents);
-      } else {
-        prependContents(style, contents);
-      }
-      return style;
-    }
-
-    private native StyleElement createElement() /*-{
-      return $doc.createStyleSheet();
-    }-*/;
-
-    private StyleElement createNewStyleSheet(String contents) {
-      StyleElement style = createElement();
-      style.setCssText(contents);
-      return style;
-    }
-  }
-
-  private static final JsArrayString toInject = JavaScriptObject.createArray().cast();
-  private static final JsArrayString toInjectAtEnd = JavaScriptObject.createArray().cast();
-  private static final JsArrayString toInjectAtStart = JavaScriptObject.createArray().cast();
+  private static final JsArray<String> toInject = new JsArray<>();
+  private static final JsArray<String> toInjectAtEnd = new JsArray<>();
+  private static final JsArray<String> toInjectAtStart = new JsArray<>();
 
   private static ScheduledCommand flusher = new ScheduledCommand() {
     public void execute() {
@@ -320,7 +203,7 @@ public class StyleInjector {
    * @return the StyleElement that contains the newly-injected CSS (unreliable
    *         on Internet Explorer)
    */
-  public static StyleElement injectStylesheet(String contents) {
+  public static HTMLStyleElement injectStylesheet(String contents) {
     toInject.push(contents);
     return flush(toInject);
   }
@@ -338,7 +221,7 @@ public class StyleInjector {
    * @return the StyleElement that contains the newly-injected CSS (unreliable
    *         on Internet Explorer)
    */
-  public static StyleElement injectStylesheetAtEnd(String contents) {
+  public static HTMLStyleElement injectStylesheetAtEnd(String contents) {
     toInjectAtEnd.push(contents);
     return flush(toInjectAtEnd);
   }
@@ -356,7 +239,7 @@ public class StyleInjector {
    * @return the StyleElement that contains the newly-injected CSS (unreliable
    *         on Internet Explorer)
    */
-  public static StyleElement injectStylesheetAtStart(String contents) {
+  public static HTMLStyleElement injectStylesheetAtStart(String contents) {
     toInjectAtStart.unshift(contents);
     return flush(toInjectAtStart);
   }
@@ -374,38 +257,38 @@ public class StyleInjector {
    *          {@link #injectStylesheet(String)}.
    * @param contents the new contents of the stylesheet.
    */
-  public static void setContents(StyleElement style, String contents) {
-    StyleInjectorImpl.IMPL.setContents(style, contents);
+  public static void setContents(HTMLStyleElement style, String contents) {
+    sImpl.setContents(style, contents);
   }
 
   /**
    * The <code>which</code> parameter is used to support the deprecated API.
    */
-  private static StyleElement flush(JavaScriptObject which) {
-    StyleElement toReturn = null;
-    StyleElement maybeReturn;
+  private static HTMLStyleElement flush(Object which) {
+    HTMLStyleElement toReturn = null;
+    HTMLStyleElement maybeReturn;
 
-    if (toInjectAtStart.length() != 0) {
+    if (toInjectAtStart.length != 0) {
       String css = toInjectAtStart.join("");
-      maybeReturn = StyleInjectorImpl.IMPL.injectStyleSheetAtStart(css);
+      maybeReturn = sImpl.injectStyleSheetAtStart(css);
       if (toInjectAtStart == which) {
         toReturn = maybeReturn;
       }
       toInjectAtStart.setLength(0);
     }
 
-    if (toInject.length() != 0) {
+    if (toInject.length != 0) {
       String css = toInject.join("");
-      maybeReturn = StyleInjectorImpl.IMPL.injectStyleSheet(css);
+      maybeReturn = sImpl.injectStyleSheet(css);
       if (toInject == which) {
         toReturn = maybeReturn;
       }
       toInject.setLength(0);
     }
 
-    if (toInjectAtEnd.length() != 0) {
+    if (toInjectAtEnd.length != 0) {
       String css = toInjectAtEnd.join("");
-      maybeReturn = StyleInjectorImpl.IMPL.injectStyleSheetAtEnd(css);
+      maybeReturn = sImpl.injectStyleSheetAtEnd(css);
       if (toInjectAtEnd == which) {
         toReturn = maybeReturn;
       }

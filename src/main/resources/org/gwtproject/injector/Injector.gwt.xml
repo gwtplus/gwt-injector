@@ -22,14 +22,4 @@
 
   <!-- Remove, should only depend on elemental -->
   <inherits name="com.google.gwt.core.Core" />
-  <inherits name="com.google.gwt.useragent.UserAgent" />
-  <inherits name="com.google.gwt.dom.DOM" />
-
-  <replace-with class="org.gwtproject.injector.client.StyleInjector.StyleInjectorImplIE">
-    <when-type-is class="org.gwtproject.injector.client.StyleInjector.StyleInjectorImpl" />
-    <any>
-      <when-property-is name="user.agent" value="ie8" />
-      <when-property-is name="user.agent" value="ie9" />
-    </any>
-  </replace-with>
 </module>
